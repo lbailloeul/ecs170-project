@@ -1,0 +1,8 @@
+result/
+__pycache__/
+*.pyc
+.idea/
+.DS_Store
+.venv/
+data/
+
