@@ -16,7 +16,7 @@ from matplotlib import pyplot as plt
 class Method_MLP(method, nn.Module):
     data = None
     # it defines the max rounds to train the model
-    max_epoch = 230
+    max_epoch = 300
     # it defines the learning rate for gradient descent based optimizer for model learning
     learning_rate = 1e-3
 
@@ -26,27 +26,20 @@ class Method_MLP(method, nn.Module):
     def __init__(self, mName, mDescription):
         method.__init__(self, mName, mDescription)
         nn.Module.__init__(self)
-        # check here for nn.Linear doc: https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
-        self.fc_layer_1 = nn.Linear(784, 128)
-        # check here for nn.ReLU doc: https://pytorch.org/docs/stable/generated/torch.nn.ReLU.html
+        self.fc_layer_1 = nn.Linear(784, 256)
         self.activation_func_1 = nn.ReLU()
-        self.fc_layer_2 = nn.Linear(128, 10)
-        # check here for nn.Softmax doc: https://pytorch.org/docs/stable/generated/torch.nn.Softmax.html
-        # self.activation_func_2 = nn.Softmax(dim=1)
+        self.fc_layer_2 = nn.Linear(256, 128)
+        self.activation_func_2 = nn.ReLU()
+        self.fc_layer_3 = nn.Linear(128, 10)
 
     # it defines the forward propagation function for input x
     # this function will calculate the output layer by layer
 
     def forward(self, x):
         '''Forward propagation'''
-        # hidden layer embeddings
-        h = self.activation_func_1(self.fc_layer_1(x))
-        # outout layer result
-        # self.fc_layer_2(h) will be a nx2 tensor
-        # n (denotes the input instance number): 0th dimension; 2 (denotes the class number): 1st dimension
-        # we do softmax along dim=1 to get the normalized classification probability distributions for each instance
-        # y_pred = self.activation_func_2(self.fc_layer_2(h))
-        y_pred = self.fc_layer_2(h)
+        h1 = self.activation_func_1(self.fc_layer_1(x))
+        h2 = self.activation_func_2(self.fc_layer_2(h1))
+        y_pred = self.fc_layer_3(h2)
         return y_pred
 
     # backward error propagation will be implemented by pytorch automatically
