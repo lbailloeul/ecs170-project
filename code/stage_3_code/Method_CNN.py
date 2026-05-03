@@ -1,56 +1,44 @@
-'''
-Concrete MethodModule class for a specific learning MethodModule
-'''
-
-# Copyright (c) 2017-Current Jiawei Zhang <jiawei@ifmlab.org>
-# License: TBD
-
 from code.base_class.method import method
 from code.stage_2_code.Evaluate_Accuracy import Evaluate_Accuracy, Evaluate_F1, Evaluate_Precision, Evaluate_Recall
 import torch
-from torch import nn
+import torch.nn as nn
+import torch.optim as optim
+import torchvision
+import torchvision.transforms as transforms
+import torch.nn.functional as F
 import numpy as np
 from matplotlib import pyplot as plt
 
+class Method_CNN(method, nn.Module):
+    def __init__(self):
+        super(Method_CNN, self).__init__()
 
-class Method_MLP(method, nn.Module):
-    data = None
-    # it defines the max rounds to train the model
-    max_epoch = 231
-    # it defines the learning rate for gradient descent based optimizer for model learning
-    learning_rate = 1e-3
-
-    # it defines the the MLP model architecture, e.g.,
-    # how many layers, size of variables in each layer, activation function, etc.
-    # the size of the input/output portal of the model architecture should be consistent with our data input and desired output
-    def __init__(self, mName, mDescription):
-        method.__init__(self, mName, mDescription)
+        method.__init__(self, 'convolutional neural network', '')
         nn.Module.__init__(self)
-        # check here for nn.Linear doc: https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
-        self.fc_layer_1 = nn.Linear(784, 256)
-        # check here for nn.ReLU doc: https://pytorch.org/docs/stable/generated/torch.nn.ReLU.html
-        self.activation_func_1 = nn.ReLU()
-        self.fc_layer_2 = nn.Linear(256, 10)
-        # check here for nn.Softmax doc: https://pytorch.org/docs/stable/generated/torch.nn.Softmax.html
-        # self.activation_func_2 = nn.Softmax(dim=1)
 
-    # it defines the forward propagation function for input x
-    # this function will calculate the output layer by layer
+        self.learning_rate = 0.001
+        self.max_epoch = 300
+
+        self.conv1 = nn.Conv2d(3, 6, 5)
+        self.bn1 = nn.BatchNorm2d(6)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(6, 16, 5)
+        self.bn2 = nn.BatchNorm2d(16)
+        self.fc1 = nn.Linear(16 * 25 * 20, 120)
+        self.fc2 = nn.Linear(120, 84)
+        self.fc3 = nn.Linear(84, 40)
+        self.dropout = nn.Dropout(p=0.5)
 
     def forward(self, x):
-        '''Forward propagation'''
-        # hidden layer embeddings
-        h = self.activation_func_1(self.fc_layer_1(x))
-        # outout layer result
-        # self.fc_layer_2(h) will be a nx2 tensor
-        # n (denotes the input instance number): 0th dimension; 2 (denotes the class number): 1st dimension
-        # we do softmax along dim=1 to get the normalized classification probability distributions for each instance
-        # y_pred = self.activation_func_2(self.fc_layer_2(h))
-        y_pred = self.fc_layer_2(h)
-        return y_pred
-
-    # backward error propagation will be implemented by pytorch automatically
-    # so we don't need to define the error backpropagation function here
+        x = self.pool(F.relu(self.bn1(self.conv1(x))))
+        x = self.pool(F.relu(self.bn2(self.conv2(x))))
+        x = torch.flatten(x, 1)
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = F.relu(self.fc2(x))
+        x = self.dropout(x)
+        x = self.fc3(x)
+        return x
 
     def fit(self, X, y, X_test, y_test):
         epochs = []
@@ -70,10 +58,19 @@ class Method_MLP(method, nn.Module):
         recall_evaluator = Evaluate_Recall('training evaluator', '')
         f1_evaluator = Evaluate_F1('training evaluator', '')
 
-        X_train_tensor = torch.FloatTensor(np.array(X))
-        y_train_tensor = torch.LongTensor(np.array(y))
-        X_test_tensor = torch.FloatTensor(np.array(X_test))
-        y_test_tensor = torch.LongTensor(np.array(y_test))
+        X_train_tensor = torch.FloatTensor(np.array(X)).permute(0, 3, 1, 2) / 255.0
+        X_test_tensor = torch.FloatTensor(np.array(X_test)).permute(0, 3, 1, 2) / 255.0
+        y_train_tensor = torch.LongTensor(np.array(y)) - 1
+        y_test_tensor = torch.LongTensor(np.array(y_test)) - 1
+
+        # augment: horizontal flip + vertical flip (upside down)
+        X_flip_h = torch.flip(X_train_tensor, dims=[3])
+        X_flip_v = torch.flip(X_train_tensor, dims=[2])
+        X_train_tensor = torch.cat([X_train_tensor, X_flip_h, X_flip_v], dim=0)
+        y_train_tensor = torch.cat([y_train_tensor] * 3, dim=0)
+
+        best_test_acc = 0.0
+        best_state = None
 
         # it will be an iterative gradient updating process
         # we don't do mini-batch, we use the whole input as one batch
@@ -103,6 +100,10 @@ class Method_MLP(method, nn.Module):
 
                 accuracy_evaluator.data = {'true_y': y_test_tensor, 'pred_y': y_test_pred.max(1)[1]}
                 test_acc = accuracy_evaluator.evaluate()
+
+                if test_acc > best_test_acc:
+                    best_test_acc = test_acc
+                    best_state = {k: v.clone() for k, v in self.state_dict().items()}
 
                 precision_evaluator.data = {'true_y': y_train_tensor, 'pred_y': y_pred.max(1)[1]}
                 train_prec = precision_evaluator.evaluate()
@@ -142,14 +143,20 @@ class Method_MLP(method, nn.Module):
         print('Epoch:', epoch, 'Training Precision:', train_prec, 'Testing Precision:', test_prec)
         print('Epoch:', epoch, 'Training F1 :', train_f1, 'Testing F1 :', test_f1)
 
+        self.load_state_dict(best_state)
         return epochs, accuracies, test_accuracies, losses, test_losses, precisions, test_precisions, recalls, test_recalls, f1s, test_f1s
 
     def test(self, X):
         # do the testing, and result the result
-        y_pred = self.forward(torch.FloatTensor(np.array(X)))
+        self.eval()
+        X_tensor = torch.FloatTensor(np.array(X)).permute(0, 3, 1, 2) / 255.0
+
+        with torch.no_grad():
+            y_pred = self.forward(X_tensor)
+
         # convert the probability distributions to the corresponding labels
         # instances will get the labels corresponding to the largest probability
-        return y_pred.max(1)[1]
+        return y_pred.max(1)[1] + 1
 
     def run(self):
         print('method running...')
@@ -162,7 +169,7 @@ class Method_MLP(method, nn.Module):
         plt.xlabel('Epoch')
         plt.ylabel('Accuracy')
         plt.legend()
-        plt.savefig('../../result/stage_2_result/Stage_2_accuracy.png')
+        plt.savefig('../../result/stage_3_result/Stage_3_accuracy.png')
         plt.close()
 
         plt.figure(figsize=(8, 5))
@@ -172,7 +179,7 @@ class Method_MLP(method, nn.Module):
         plt.xlabel('Epoch')
         plt.ylabel('Precision')
         plt.legend()
-        plt.savefig('../../result/stage_2_result/Stage_2_precision.png')
+        plt.savefig('../../result/stage_3_result/Stage_3_precision.png')
         plt.close()
 
         plt.figure(figsize=(8, 5))
@@ -182,7 +189,7 @@ class Method_MLP(method, nn.Module):
         plt.xlabel('Epoch')
         plt.ylabel('Recall')
         plt.legend()
-        plt.savefig('../../result/stage_2_result/Stage_2_recall.png')
+        plt.savefig('../../result/stage_3_result/Stage_3_recall.png')
         plt.close()
 
         plt.figure(figsize=(8, 5))
@@ -192,7 +199,7 @@ class Method_MLP(method, nn.Module):
         plt.xlabel('Epoch')
         plt.ylabel('f1')
         plt.legend()
-        plt.savefig('../../result/stage_2_result/Stage_2_f1.png')
+        plt.savefig('../../result/stage_3_result/Stage_3_f1.png')
         plt.close()
 
         plt.figure(figsize=(8, 5))
@@ -201,12 +208,11 @@ class Method_MLP(method, nn.Module):
         plt.title('Epoch vs Loss (Zoomed)')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
-        plt.xlim(0, 50)
         plt.legend()
-        plt.savefig('../../result/stage_2_result/Stage_2_loss.png')
+        plt.savefig('../../result/stage_3_result/Stage_3_loss.png')
         plt.close()
 
-        torch.save(self.state_dict(), '../../result/stage_2_result/Stage_2_model.pt')
+        torch.save(self.state_dict(), '../../result/stage_3_result/Stage_3_model.pt')
         print('--start testing...')
         pred_y = self.test(self.data['test']['X'])
         return {'pred_y': pred_y, 'true_y': self.data['test']['y']}
