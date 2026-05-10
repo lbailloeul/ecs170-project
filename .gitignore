@@ -1,8 +1,9 @@
 result/
-__pycache__/
+**/__pycache__/
 *.pyc
 .idea/
 .DS_Store
 .venv/
 data/
+.vscode/
 

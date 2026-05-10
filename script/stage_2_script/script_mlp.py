@@ -7,6 +7,11 @@ from code.stage_2_code.Evaluate_Accuracy import Evaluate_Accuracy
 import numpy as np
 import torch
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+
 #---- Multi-Layer Perceptron script ----
 if 1:
     #---- parameter section -------------------------------
@@ -16,7 +21,7 @@ if 1:
 
     # ---- objection initialization setction ---------------
     data_obj = Dataset_Loader('stage 2', '')
-    data_obj.dataset_source_folder_path = '../../data/stage_2_data/'
+    data_obj.dataset_source_folder_path = 'data/stage_2_data/'
     data_obj.dataset_train_file_name = 'train.csv'
     data_obj.dataset_test_file_name = 'test.csv'
 
@@ -24,7 +29,7 @@ if 1:
     method_obj = Method_MLP('multi-layer perceptron', '')
 
     result_obj = Result_Saver('saver', '')
-    result_obj.result_destination_folder_path = '../../result/stage_2_result/MLP_'
+    result_obj.result_destination_folder_path = 'result/stage_2_result/MLP_'
     result_obj.result_destination_file_name = 'prediction_result'
 
     # setting_obj = Setting_KFold_CV('k fold cross validation', '')
