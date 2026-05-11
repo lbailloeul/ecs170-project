@@ -12,12 +12,12 @@ Runner script for the MNIST CNN baseline.
 '''
 
 
-from code.stage_3_code.Dataset_Loader import Dataset_Loader
-from code.stage_3_code.Method_CNN import Method_CNN
-from code.stage_3_code.Result_Saver import Result_Saver
-from code.stage_3_code.Setting_KFold_CV import Setting_KFold_CV
-from code.stage_3_code.Setting_Train_Test_File import Setting_Train_Test_File
-from code.stage_3_code.Evaluate_Accuracy import Evaluate_Accuracy
+from src.stage_3_code.Dataset_Loader import Dataset_Loader
+from src.stage_3_code.Method_CNN_MNIST import Method_CNN
+from src.stage_3_code.Result_Saver import Result_Saver
+from src.stage_3_code.Setting_KFold_CV import Setting_KFold_CV
+from src.stage_3_code.Setting_Train_Test_File import Setting_Train_Test_File
+from src.stage_3_code.Evaluate_Accuracy import Evaluate_Accuracy
 import numpy as np
 import torch
 
@@ -30,7 +30,7 @@ if 1:
 
     # ---- objection initialization setction ---------------
     data_obj = Dataset_Loader('stage 3 MNIST', '')
-    data_obj.dataset_source_folder_path = '/data/stage_3_data/'
+    data_obj.dataset_source_folder_path = 'data/stage_3_data/'
     data_obj.dataset_file_name = 'MNIST'
 
 
@@ -40,7 +40,7 @@ if 1:
     # ---- Result saver ---------------
 
     result_obj = Result_Saver('saver', '')
-    result_obj.result_destination_folder_path = '/result/stage_3_result/CNN_'
+    result_obj.result_destination_folder_path = 'result/stage_3_result/CNN_'
     result_obj.result_destination_file_name = 'prediction_result'
 
 
