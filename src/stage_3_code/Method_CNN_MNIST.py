@@ -41,6 +41,12 @@ class Method_CNN(method, nn.Module):
         method.__init__(self, 'CNN-MNIST', '')
         nn.Module.__init__(self)
 
+        # Device selection: use MPS (Apple Silicon) if available, else CPU
+        if torch.backends.mps.is_available():
+            self.device = torch.device('mps')
+        else:
+            self.device = torch.device('cpu')
+        print(f'Using device: {self.device}')
 
         # -- CONVOLUTIONAL LAYERS --------------------------------------- 
         # Conv2d(in_channels, out_channels, kernel_size)
@@ -50,8 +56,18 @@ class Method_CNN(method, nn.Module):
         # 6 then 16 filters.  Stacking more filters in deeper layers
         #   lets the network learn increasingly abstract features (edges →
         #   curves → digit parts).
-        self.conv1 = nn.Conv2d(1, 6, 5)   # 1-channel input, 6 feature maps
-        self.conv2 = nn.Conv2d(6, 16, 5)  # 6-channel input, 16 feature maps
+        # self.conv1 = nn.Conv2d(1, 6, 5)   # 1-channel input, 6 feature maps
+        # self.conv2 = nn.Conv2d(6, 16, 5)  # 6-channel input, 16 feature maps
+
+        # Ablation study 3: Conv layer width
+        # Variant A (kernel=3): flattened = 16×5×5 = 400
+        # self.conv1 = nn.Conv2d(1, 6, 3)   # EXPERIMENT: kernel reduced from 5 to 3
+        # self.conv2 = nn.Conv2d(6, 16, 3)  # EXPERIMENT: kernel reduced from 5 to 3
+
+        # Variant B (kernel=7): flattened = 16×2×2 = 64
+        self.conv1 = nn.Conv2d(1, 6, 7)   # EXPERIMENT: kernel increased from 5 to 7
+        self.conv2 = nn.Conv2d(6, 16, 7)  # EXPERIMENT: kernel increased from 5 to 7
+
 
         # Batch Norm: normalizes activations after each conv so gradients
         # flow more stably + faster convergence.
@@ -67,14 +83,37 @@ class Method_CNN(method, nn.Module):
         # -- FULLY-CONNECTED LAYERS ---------------------------------------
         # After the two conv+pool pairs the spatial size is 4×4 with 16
         # channels → 16*4*4 = 256 inputs to the first FC layer.
-        self.fc1 = nn.Linear(256, 120)  # 256 → 120
+        # self.fc1 = nn.Linear(256, 120)  # 256 → 120
         self.fc2 = nn.Linear(120, 10)   # 120 → 10 (one logit per digit)
+
+        # Ablation study 2: FC layer width
+        # Variant A — 1 FC layer (remove fc1 entirely): 256 → 10
+        # self.fc1 = nn.Linear(256, 10)   # EXPERIMENT: removed hidden FC layer, direct 256→10
+
+        # # Variant B — 3 FC layers: 256 → 120 → 64 → 10
+        # self.fc1 = nn.Linear(256, 120)  # EXPERIMENT: added third FC layer
+        # self.fc2 = nn.Linear(120, 64)   # EXPERIMENT: added third FC layer
+        # self.fc3 = nn.Linear(64, 10)    # EXPERIMENT: added third FC layer
+
+        # Ablation Study 3:
+        
+        # Variant A (kernel=3): flattened = 16×5×5 = 400
+        # self.fc1 = nn.Linear(400, 120)  # EXPERIMENT: fc1 input updated for kernel=3
+
+        # Variant B (kernel=7): flattened = 16×2×2 = 64
+        self.fc1 = nn.Linear(64, 120)   # EXPERIMENT: fc1 input updated for kernel=7
 
         # Dropout randomly zeros activations during training to prevent
         # co-adaptation of neurons --> model doesn't over-fit the training set.
         # p=0.5 means each neuron is kept with probability 0.5.
         # Dropout is automatically disabled during model.eval().
         self.dropout = nn.Dropout(p=0.5)
+
+        # abaltion study 1: Dropout rate
+        # self.dropout = nn.Dropout(p=0.2) #variant 1
+        # self.dropout = nn.Dropout(p=0.95) #variant 2
+
+
 
 
 
@@ -92,6 +131,19 @@ class Method_CNN(method, nn.Module):
         x = self.fc2(x)            # → 10  (raw logits, no softmax needed
                                    #        because CrossEntropyLoss applies
                                    #        log-softmax internally)
+
+
+        # Ablation study 2: FC layer width
+        # Variant A — 1 FC layer (remove fc1 entirely): 256 → 10
+        # x = self.fc1(x)
+        # no relu, no dropout, no fc2
+
+        # Variant B — 3 FC layers: 256 → 120 → 64 → 10
+        # x = F.relu(self.fc1(x))
+        # x = self.dropout(x)
+        # x = F.relu(self.fc2(x))
+        # x = self.fc3(x)
+
         return x
 
 
@@ -116,6 +168,12 @@ class Method_CNN(method, nn.Module):
         # MNIST labels are already 0-9, so NO subtraction needed here.
         y_train_t = torch.LongTensor(np.array(y))
         y_test_t  = torch.LongTensor(np.array(y_test))
+
+        self.to(self.device)
+        X_train_t = X_train_t.to(self.device)
+        X_test_t  = X_test_t.to(self.device)
+        y_train_t = y_train_t.to(self.device)
+        y_test_t  = y_test_t.to(self.device)
  
         # ── LOSS & OPTIMISER ──────────────────────────────────────────
         # CrossEntropyLoss = log-softmax + negative log-likelihood.
@@ -182,7 +240,7 @@ class Method_CNN(method, nn.Module):
  
             # Helper to run an evaluator and return its scalar score
             def score(evaluator, true, pred):
-                evaluator.data = {'true_y': true, 'pred_y': pred}
+                evaluator.data = {'true_y': true.cpu(), 'pred_y': pred.cpu()}
                 return evaluator.evaluate()
  
             tr_acc  = score(acc_eval,  y_train_t, train_pred)
@@ -210,13 +268,15 @@ class Method_CNN(method, nn.Module):
             train_recs.append(tr_rec);   test_recs.append(te_rec)
             train_f1s.append(tr_f1);     test_f1s.append(te_f1)
  
-            print(f'Epoch {epoch:3d} | '
-                  f'Loss {train_loss:.4f}/{test_loss:.4f} | '
-                  f'Acc {tr_acc:.4f}/{te_acc:.4f}')
+            print('Epoch:', epoch, 'Training Accuracy:', tr_acc, 'Testing Accuracy:', te_acc)
+            print('Epoch:', epoch, 'Training Recall:', tr_rec, 'Testing Recall:', te_rec)
+            print('Epoch:', epoch, 'Training Precision:', tr_prec, 'Testing Precision:', te_prec)
+            print('Epoch:', epoch, 'Training F1 :', tr_f1, 'Testing F1 :', te_f1)
  
         # Restore best weights before returning
         self.load_state_dict(best_state)
         print(f'\nBest test accuracy: {best_test_acc:.4f}')
+
  
         return (epochs_hist,
                 train_accs, test_accs,
@@ -231,10 +291,11 @@ class Method_CNN(method, nn.Module):
         '''Run trained model on X and return predicted labels (0-9).'''
         self.eval()
         X_t = torch.FloatTensor(np.array(X)).unsqueeze(1) / 255.0
+        X_t = X_t.to(self.device)
 
         with torch.no_grad():
             logits = self.forward(X_t)
-        return logits.max(1)[1]  # argmax — the predicted digit
+        return logits.max(1)[1].cpu()  # argmax — the predicted digit
 
 
 
@@ -257,7 +318,7 @@ class Method_CNN(method, nn.Module):
         # -- LEARNING CURVES ---------------------------------------
         # plots a metric vs. training time (epochs).
  
-        result_dir = '../../result/stage_3_result/'
+        result_dir = 'result/stage_3_result/'
  
         def save_plot(y1, y2, label1, label2, ylabel, title, fname):
             plt.figure(figsize=(8, 5))
@@ -317,4 +378,5 @@ class Method_CNN(method, nn.Module):
         print('\n--start testing...')
         pred_y = self.test(self.data['test']['X'])
         return {'pred_y': pred_y, 'true_y': self.data['test']['y']}
+
  
