@@ -27,7 +27,16 @@ class Method_CNN(method, nn.Module):
         self.fc1 = nn.Linear(16 * 25 * 20, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 40)
-        self.dropout = nn.Dropout(p=0.5)
+        self.dropout = nn.Dropout(p=0.7)
+
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = torch.device('mps')
+        else:
+            self.device = torch.device('cpu')
+        print(f'using device: {self.device}')
+        self.to(self.device)
 
     def forward(self, x):
         x = self.pool(F.relu(self.bn1(self.conv1(x))))
@@ -50,6 +59,7 @@ class Method_CNN(method, nn.Module):
         losses, test_losses = [], []
         # check here for the torch.optim doc: https://pytorch.org/docs/stable/optim.html
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.max_epoch)
         # check here for the nn.CrossEntropyLoss doc: https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html
         loss_function = nn.CrossEntropyLoss()
         # for training accuracy investigation purpose
@@ -58,10 +68,10 @@ class Method_CNN(method, nn.Module):
         recall_evaluator = Evaluate_Recall('training evaluator', '')
         f1_evaluator = Evaluate_F1('training evaluator', '')
 
-        X_train_tensor = torch.FloatTensor(np.array(X)).permute(0, 3, 1, 2) / 255.0
-        X_test_tensor = torch.FloatTensor(np.array(X_test)).permute(0, 3, 1, 2) / 255.0
-        y_train_tensor = torch.LongTensor(np.array(y)) - 1
-        y_test_tensor = torch.LongTensor(np.array(y_test)) - 1
+        X_train_tensor = (torch.FloatTensor(np.array(X)).permute(0, 3, 1, 2) / 255.0).to(self.device)
+        X_test_tensor = (torch.FloatTensor(np.array(X_test)).permute(0, 3, 1, 2) / 255.0).to(self.device)
+        y_train_tensor = (torch.LongTensor(np.array(y)) - 1).to(self.device)
+        y_test_tensor = (torch.LongTensor(np.array(y_test)) - 1).to(self.device)
 
         # augment: horizontal flip + vertical flip (upside down)
         X_flip_h = torch.flip(X_train_tensor, dims=[3])
@@ -89,38 +99,44 @@ class Method_CNN(method, nn.Module):
             # check here for the opti.step doc: https://pytorch.org/docs/stable/optim.html
             # update the variables according to the optimizer and the gradients calculated by the above loss.backward function
             optimizer.step()
+            scheduler.step()
 
             if epoch % 1 == 0:
                 self.eval()
                 y_test_pred = self.forward(X_test_tensor)
                 test_loss = loss_function(y_test_pred, y_test_tensor)
 
-                accuracy_evaluator.data = {'true_y': y_train_tensor, 'pred_y': y_pred.max(1)[1]}
+                y_train_cpu = y_train_tensor.cpu()
+                y_test_cpu = y_test_tensor.cpu()
+                y_pred_cpu = y_pred.max(1)[1].cpu()
+                y_test_pred_cpu = y_test_pred.max(1)[1].cpu()
+
+                accuracy_evaluator.data = {'true_y': y_train_cpu, 'pred_y': y_pred_cpu}
                 train_acc = accuracy_evaluator.evaluate()
 
-                accuracy_evaluator.data = {'true_y': y_test_tensor, 'pred_y': y_test_pred.max(1)[1]}
+                accuracy_evaluator.data = {'true_y': y_test_cpu, 'pred_y': y_test_pred_cpu}
                 test_acc = accuracy_evaluator.evaluate()
 
                 if test_acc > best_test_acc:
                     best_test_acc = test_acc
                     best_state = {k: v.clone() for k, v in self.state_dict().items()}
 
-                precision_evaluator.data = {'true_y': y_train_tensor, 'pred_y': y_pred.max(1)[1]}
+                precision_evaluator.data = {'true_y': y_train_cpu, 'pred_y': y_pred_cpu}
                 train_prec = precision_evaluator.evaluate()
 
-                precision_evaluator.data = {'true_y': y_test_tensor, 'pred_y': y_test_pred.max(1)[1]}
+                precision_evaluator.data = {'true_y': y_test_cpu, 'pred_y': y_test_pred_cpu}
                 test_prec = precision_evaluator.evaluate()
 
-                recall_evaluator.data = {'true_y': y_train_tensor, 'pred_y': y_pred.max(1)[1]}
+                recall_evaluator.data = {'true_y': y_train_cpu, 'pred_y': y_pred_cpu}
                 train_recall = recall_evaluator.evaluate()
 
-                recall_evaluator.data = {'true_y': y_test_tensor, 'pred_y': y_test_pred.max(1)[1]}
+                recall_evaluator.data = {'true_y': y_test_cpu, 'pred_y': y_test_pred_cpu}
                 test_recall = recall_evaluator.evaluate()
 
-                f1_evaluator.data = {'true_y': y_train_tensor, 'pred_y': y_pred.max(1)[1]}
+                f1_evaluator.data = {'true_y': y_train_cpu, 'pred_y': y_pred_cpu}
                 train_f1 = f1_evaluator.evaluate()
 
-                f1_evaluator.data = {'true_y': y_test_tensor, 'pred_y': y_test_pred.max(1)[1]}
+                f1_evaluator.data = {'true_y': y_test_cpu, 'pred_y': y_test_pred_cpu}
                 test_f1 = f1_evaluator.evaluate()
 
                 epochs.append(epoch)
@@ -149,14 +165,14 @@ class Method_CNN(method, nn.Module):
     def test(self, X):
         # do the testing, and result the result
         self.eval()
-        X_tensor = torch.FloatTensor(np.array(X)).permute(0, 3, 1, 2) / 255.0
+        X_tensor = (torch.FloatTensor(np.array(X)).permute(0, 3, 1, 2) / 255.0).to(self.device)
 
         with torch.no_grad():
             y_pred = self.forward(X_tensor)
 
         # convert the probability distributions to the corresponding labels
         # instances will get the labels corresponding to the largest probability
-        return y_pred.max(1)[1] + 1
+        return (y_pred.max(1)[1] + 1).cpu()
 
     def run(self):
         print('method running...')
