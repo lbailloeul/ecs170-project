@@ -21,7 +21,7 @@ if 1:
     data_obj = Dataset_Loader('stage 4 text generation', '')
     data_obj.dataset_source_folder_path = str(REPO_ROOT / 'data' / 'stage_4_data' / 'text_generation') + '/'
     data_obj.dataset_file_name = 'data'
-    data_obj.sequence_length = 12
+    data_obj.sequence_length = 32
     data_obj.train_ratio = 0.8
     data_obj.min_freq = 2
     data_obj.max_vocab_size = 3000
@@ -32,14 +32,14 @@ if 1:
         'recurrent neural network text generator',
         '',
         embed_size=128,
-        hidden_size=128,
+        hidden_size=256,
         rnn_type='lstm',
-        dropout=0.2,
-        max_epoch=20,
-        batch_size=64,
-        learning_rate=0.0015,
-        weight_decay=0.00001,
-        early_stopping_patience=4,
+        dropout=0.4,
+        max_epoch=40,
+        batch_size=128,
+        learning_rate=0.0005,
+        weight_decay=0.0001,
+        early_stopping_patience=6,
     )
     method_obj.data = loaded_data
 

@@ -245,7 +245,70 @@ class Method_RNN(method, nn.Module):
 
         return output
 
-    def generate(self, seed_text='', max_new_tokens=30, temperature=0.8):
+    def _sample_next_token(
+        self,
+        logits,
+        generated_indices,
+        temperature,
+        top_k,
+        top_p,
+        repetition_penalty,
+        min_new_tokens,
+        new_tokens_generated,
+    ):
+        logits = logits.squeeze(0).clone()
+
+        for idx in [self.pad_idx, self.unk_idx, self.bos_idx]:
+            logits[idx] = -float('inf')
+        if new_tokens_generated < min_new_tokens:
+            logits[self.eos_idx] = -float('inf')
+
+        if repetition_penalty is not None and repetition_penalty > 1.0:
+            for idx in set(generated_indices[-20:]):
+                if 0 <= idx < logits.numel():
+                    if logits[idx] < 0:
+                        logits[idx] *= repetition_penalty
+                    else:
+                        logits[idx] /= repetition_penalty
+
+        temperature = max(temperature, 1e-5)
+        logits = logits / temperature
+
+        if top_k is not None and top_k > 0 and top_k < logits.numel():
+            threshold = torch.topk(logits, top_k).values[-1]
+            logits[logits < threshold] = -float('inf')
+
+        probabilities = torch.softmax(logits, dim=-1)
+
+        if top_p is not None and 0.0 < top_p < 1.0:
+            sorted_probs, sorted_indices = torch.sort(probabilities, descending=True)
+            cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+            remove = cumulative_probs > top_p
+            remove[1:] = remove[:-1].clone()
+            remove[0] = False
+            sorted_probs[remove] = 0.0
+            total = sorted_probs.sum()
+            if total > 0:
+                sorted_probs = sorted_probs / total
+                sampled_rank = torch.multinomial(sorted_probs, num_samples=1).item()
+                return sorted_indices[sampled_rank].item()
+
+        total = probabilities.sum()
+        if not torch.isfinite(total) or total <= 0:
+            return torch.argmax(logits).item()
+
+        return torch.multinomial(probabilities, num_samples=1).item()
+
+    def generate(
+        self,
+        seed_text='',
+        max_new_tokens=30,
+        temperature=0.55,
+        top_k=30,
+        top_p=0.85,
+        repetition_penalty=1.15,
+        min_new_tokens=5,
+    ):
         self._configure_from_data()
         self.eval()
 
@@ -254,16 +317,23 @@ class Method_RNN(method, nn.Module):
         input_indices.extend(self.token_to_idx.get(token, self.unk_idx) for token in tokens)
         generated_indices = input_indices[:]
         hidden = None
-        temperature = max(temperature, 1e-5)
 
         with torch.no_grad():
             input_tensor = torch.LongTensor([input_indices]).to(self.device)
             logits, hidden = self.forward(input_tensor, hidden)
             next_logits = logits[:, -1, :]
 
-            for _ in range(max_new_tokens):
-                probabilities = torch.softmax(next_logits / temperature, dim=-1)
-                next_idx = torch.multinomial(probabilities, num_samples=1).item()
+            for new_tokens_generated in range(max_new_tokens):
+                next_idx = self._sample_next_token(
+                    next_logits,
+                    generated_indices,
+                    temperature,
+                    top_k,
+                    top_p,
+                    repetition_penalty,
+                    min_new_tokens,
+                    new_tokens_generated,
+                )
                 generated_indices.append(next_idx)
 
                 if next_idx == self.eos_idx:
@@ -353,9 +423,9 @@ class Method_RNN(method, nn.Module):
         seed_tokens = self._tokenize(seed_text)[:3]
         seed_three_words = self._detokenize(seed_tokens) or 'why did the'
         generated_samples = [
-            self.generate(seed_text='why did the', max_new_tokens=25, temperature=0.7),
-            self.generate(seed_text='what do you', max_new_tokens=25, temperature=0.7),
-            self.generate(seed_text=seed_three_words, max_new_tokens=25, temperature=0.7),
+            self.generate(seed_text='why did the', max_new_tokens=25),
+            self.generate(seed_text='what do you', max_new_tokens=25),
+            self.generate(seed_text=seed_three_words, max_new_tokens=25),
         ]
         self._save_report_materials(best_epoch, best_test_loss, stopped_epoch, generated_samples)
 
